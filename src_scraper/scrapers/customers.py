@@ -1,6 +1,5 @@
 """客户数据抓取模块"""
 import asyncio
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -40,40 +39,16 @@ class CustomerScraper(PaginationScraper):
             await self.nav.expand_all_hierarchical_items()
             await asyncio.sleep(2)
 
-            # 分页抓取所有数据
-            all_data = []
-            page_num = 1
+            # 截图诊断
+            await self.screenshot("customers_list.png")
 
-            while True:
-                self.logger.info(f"抓取第 {page_num} 页...")
+            # 滚动加载所有数据
+            self.logger.info("开始滚动加载数据...")
+            await self.nav.scroll_to_load_all(max_scrolls=50, scroll_delay=1.5)
+            await asyncio.sleep(2)
 
-                # 截图诊断（只截第一页）
-                if page_num == 1:
-                    await self.screenshot("customers_list.png")
-
-                # 提取当前页数据
-                page_data = await self._extract_grid_data()
-                if page_data:
-                    self.logger.info(f"第 {page_num} 页提取到 {len(page_data)} 条")
-                    all_data.extend(page_data)
-                else:
-                    self.logger.info(f"第 {page_num} 页无数据")
-
-                # 检查是否有下一页
-                has_next = await self.nav.has_next_page()
-                if not has_next:
-                    self.logger.info("已到达最后一页")
-                    break
-
-                # 点击下一页
-                success = await self.nav.go_to_next_page()
-                if not success:
-                    self.logger.info("无法跳转下一页，停止")
-                    break
-
-                # 等待数据加载
-                await asyncio.sleep(2)
-                page_num += 1
+            # 提取所有数据
+            all_data = await self._extract_grid_data()
 
             # 去重
             seen = set()
@@ -93,8 +68,7 @@ class CustomerScraper(PaginationScraper):
             return {
                 "success": True,
                 "count": len(unique_data),
-                "data": unique_data,
-                "pages": page_num
+                "data": unique_data
             }
 
         except Exception as e:
@@ -105,7 +79,6 @@ class CustomerScraper(PaginationScraper):
     async def _extract_grid_data(self) -> List[Dict[str, Any]]:
         """从1C的gridBody提取客户数据"""
         try:
-            # 等待gridBody加载
             await asyncio.sleep(1)
 
             all_data = []
@@ -113,25 +86,20 @@ class CustomerScraper(PaginationScraper):
 
             for idx, line in enumerate(grid_lines):
                 try:
-                    # 获取所有gridBox
                     grid_boxes = await line.query_selector_all(".gridBox")
                     cell_texts = []
                     for box in grid_boxes:
                         text = await box.inner_text()
                         cell_texts.append(text.strip())
 
-                    # 检查是否有内容
                     has_content = any(t and len(t) > 0 for t in cell_texts)
-
                     if not has_content:
                         continue
 
-                    # 第一列通常是名称
                     name = cell_texts[1] if len(cell_texts) > 1 else cell_texts[0]
                     name = name.strip('"\'').strip()
 
                     if name and len(name) > 0:
-                        # 排除表头行
                         if name.lower() not in ['description', 'наименование', 'код']:
                             all_data.append({
                                 'name': name,
@@ -145,6 +113,7 @@ class CustomerScraper(PaginationScraper):
                 except Exception as e:
                     continue
 
+            self.logger.info(f"提取到 {len(all_data)} 条原始数据")
             return all_data
 
         except Exception as e:

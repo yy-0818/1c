@@ -1,6 +1,5 @@
 """产品数据抓取模块"""
 import asyncio
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -40,44 +39,16 @@ class ProductScraper(PaginationScraper):
             await self.nav.expand_all_hierarchical_items()
             await asyncio.sleep(2)
 
-            # 分页抓取所有数据
-            all_data = []
-            page_num = 1
+            # 截图诊断
+            await self.screenshot("products_list.png")
 
-            while True:
-                self.logger.info(f"抓取第 {page_num} 页...")
+            # 滚动加载所有数据
+            self.logger.info("开始滚动加载数据...")
+            await self.nav.scroll_to_load_all(max_scrolls=50, scroll_delay=1.5)
+            await asyncio.sleep(2)
 
-                # 截图诊断（只截第一页）
-                if page_num == 1:
-                    await self.screenshot("products_list.png")
-
-                # 提取当前页数据
-                page_data = await self._extract_grid_data()
-                if page_data:
-                    self.logger.info(f"第 {page_num} 页提取到 {len(page_data)} 条")
-                    all_data.extend(page_data)
-                else:
-                    self.logger.info(f"第 {page_num} 页无数据")
-
-            # 检查是否有下一页
-            has_next = await self.nav.has_next_page()
-            if not has_next:
-                self.logger.info("已到达最后一页")
-                break
-
-            # 调试分页信息
-            if page_num == 1:
-                await self.nav.debug_pagination()
-
-                # 点击下一页
-                success = await self.nav.go_to_next_page()
-                if not success:
-                    self.logger.info("无法跳转下一页，停止")
-                    break
-
-                # 等待数据加载
-                await asyncio.sleep(2)
-                page_num += 1
+            # 提取所有数据
+            all_data = await self._extract_grid_data()
 
             # 去重
             seen = set()
@@ -97,8 +68,7 @@ class ProductScraper(PaginationScraper):
             return {
                 "success": True,
                 "count": len(unique_data),
-                "data": unique_data,
-                "pages": page_num
+                "data": unique_data
             }
 
         except Exception as e:
@@ -143,6 +113,7 @@ class ProductScraper(PaginationScraper):
                 except Exception as e:
                     continue
 
+            self.logger.info(f"提取到 {len(all_data)} 条原始数据")
             return all_data
 
         except Exception as e:

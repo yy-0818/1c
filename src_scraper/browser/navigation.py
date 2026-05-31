@@ -700,6 +700,80 @@ class NavigationHelper:
             self.logger.debug(f"获取页码信息失败: {e}")
             return {"current": 1, "total": 1}
 
+    async def scroll_to_load_all(self, max_scrolls: int = 50, scroll_delay: float = 1.5) -> Dict[str, Any]:
+        """
+        滚动页面加载所有数据（无限滚动场景）
+
+        Args:
+            max_scrolls: 最大滚动次数
+            scroll_delay: 每次滚动后的等待时间（秒）
+
+        Returns:
+            滚动结果信息
+        """
+        result = {
+            "scroll_count": 0,
+            "total_rows": 0,
+            "new_rows_loaded": 0
+        }
+
+        try:
+            self.logger.info("开始滚动加载数据...")
+
+            # 获取初始行数
+            initial_rows = await self.page.evaluate("""() => {
+                return document.querySelectorAll('.gridLine').length;
+            }""")
+            self.logger.info(f"初始行数: {initial_rows}")
+
+            last_row_count = initial_rows
+
+            for i in range(max_scrolls):
+                # 滚动到页面底部
+                await self.page.evaluate("""() => {
+                    // 尝试多种滚动方式
+                    const container = document.querySelector('.gridBody, .gridContainer, [class*="grid"]');
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    } else {
+                        window.scrollTo(0, document.body.scrollHeight);
+                    }
+                }""")
+
+                # 等待数据加载
+                await asyncio.sleep(scroll_delay)
+
+                # 检查当前行数
+                current_rows = await self.page.evaluate("""() => {
+                    return document.querySelectorAll('.gridLine').length;
+                }""")
+
+                result["scroll_count"] = i + 1
+                result["total_rows"] = current_rows
+
+                if current_rows > last_row_count:
+                    new_rows = current_rows - last_row_count
+                    result["new_rows_loaded"] += new_rows
+                    self.logger.info(f"滚动 {i + 1}: 新增 {new_rows} 行 (总计 {current_rows})")
+                    last_row_count = current_rows
+                elif current_rows == last_row_count:
+                    # 连续两次行数相同，可能已加载完
+                    self.logger.info(f"滚动 {i + 1}: 行数未变化 ({current_rows})，尝试继续...")
+
+                    # 再滚动几次确认
+                    if i > 2 and i % 5 == 0:
+                        self.logger.info("连续多页行数未变化，可能已加载全部数据")
+                        break
+                else:
+                    self.logger.warning(f"滚动 {i + 1}: 行数减少 {current_rows} (异常)")
+
+            self.logger.info(f"滚动加载完成: 共滚动 {result['scroll_count']} 次, 最终 {result['total_rows']} 行")
+
+        except Exception as e:
+            self.logger.error(f"滚动加载失败: {e}")
+
+        return result
+
     async def debug_pagination(self) -> Dict[str, Any]:
         """
         调试分页信息，查找页面上的分页元素
