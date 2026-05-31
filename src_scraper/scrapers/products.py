@@ -42,6 +42,9 @@ class ProductScraper(PaginationScraper):
             # 截图诊断
             await self.screenshot("products_list.png")
 
+            # 调试滚动容器
+            await self.nav.debug_scroll_container()
+
             # 滚动加载所有数据
             self.logger.info("开始滚动加载数据...")
             await self.nav.scroll_to_load_all(max_scrolls=50, scroll_delay=1.5)

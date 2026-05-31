@@ -702,7 +702,7 @@ class NavigationHelper:
 
     async def scroll_to_load_all(self, max_scrolls: int = 50, scroll_delay: float = 1.5) -> Dict[str, Any]:
         """
-        滚动页面加载所有数据（无限滚动场景）
+        滚动表格加载所有数据
 
         Args:
             max_scrolls: 最大滚动次数
@@ -728,20 +728,74 @@ class NavigationHelper:
 
             last_row_count = initial_rows
 
+            # 查找grid容器
+            grid_info = await self.page.evaluate("""() => {
+                const selectors = [
+                    '.gridBody',
+                    '.gridBody > div',
+                    '[class*="gridBody"]',
+                    '[class*="GridBody"]',
+                    '[class*="dataGrid"] tbody'
+                ];
+
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        return {
+                            selector: sel,
+                            scrollHeight: el.scrollHeight,
+                            clientHeight: el.clientHeight,
+                            canScroll: el.scrollHeight > el.clientHeight
+                        };
+                    }
+                }
+                return { selector: null };
+            }""")
+
+            self.logger.info(f"Grid容器: {grid_info}")
+
             for i in range(max_scrolls):
-                # 滚动到页面底部
+                # 方法1: 使用键盘 End 键滚动到底部
                 await self.page.evaluate("""() => {
-                    // 尝试多种滚动方式
-                    const container = document.querySelector('.gridBody, .gridContainer, [class*="grid"]');
+                    const selectors = [
+                        '.gridBody',
+                        '.gridBody > div',
+                        '[class*="gridBody"]',
+                        '[class*="GridBody"]'
+                    ];
+
+                    let container = null;
+                    for (const sel of selectors) {
+                        container = document.querySelector(sel);
+                        if (container) break;
+                    }
+
                     if (container) {
-                        container.scrollTop = container.scrollHeight;
-                    } else {
-                        window.scrollTo(0, document.body.scrollHeight);
+                        // 聚焦并按 End 键
+                        container.focus();
+                        container.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
                     }
                 }""")
 
-                # 等待数据加载
                 await asyncio.sleep(scroll_delay)
+
+                # 方法2: 滚动到最底部
+                await self.page.evaluate("""() => {
+                    const selectors = [
+                        '.gridBody',
+                        '[class*="gridBody"]'
+                    ];
+
+                    for (const sel of selectors) {
+                        const container = document.querySelector(sel);
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                            break;
+                        }
+                    }
+                }""")
+
+                await asyncio.sleep(0.5)
 
                 # 检查当前行数
                 current_rows = await self.page.evaluate("""() => {
@@ -757,15 +811,14 @@ class NavigationHelper:
                     self.logger.info(f"滚动 {i + 1}: 新增 {new_rows} 行 (总计 {current_rows})")
                     last_row_count = current_rows
                 elif current_rows == last_row_count:
-                    # 连续两次行数相同，可能已加载完
-                    self.logger.info(f"滚动 {i + 1}: 行数未变化 ({current_rows})，尝试继续...")
+                    self.logger.info(f"滚动 {i + 1}: 行数未变化 ({current_rows})")
 
-                    # 再滚动几次确认
-                    if i > 2 and i % 5 == 0:
-                        self.logger.info("连续多页行数未变化，可能已加载全部数据")
+                    # 连续5次行数不变，停止
+                    if i > 3:
+                        self.logger.info("连续多页行数未变化，已加载全部数据")
                         break
                 else:
-                    self.logger.warning(f"滚动 {i + 1}: 行数减少 {current_rows} (异常)")
+                    self.logger.warning(f"滚动 {i + 1}: 行数减少 {current_rows}")
 
             self.logger.info(f"滚动加载完成: 共滚动 {result['scroll_count']} 次, 最终 {result['total_rows']} 行")
 
@@ -843,3 +896,34 @@ class NavigationHelper:
 def create_navigation_helper(page: Page) -> NavigationHelper:
     """创建导航辅助实例"""
     return NavigationHelper(page)
+
+
+# 调试工具：在页面加载后调用此函数查找滚动容器
+async def debug_grid_scroll(page):
+    """调试grid滚动容器（独立函数）"""
+    info = await page.evaluate("""() => {
+        const result = { containers: [], rows: 0 };
+        result.rows = document.querySelectorAll('.gridLine').length;
+
+        const selectors = [
+            '.gridBody',
+            '.gridBody > div',
+            '[class*="gridBody"]',
+            '[class*="dataGrid"]'
+        ];
+
+        for (const sel of selectors) {
+            const els = document.querySelectorAll(sel);
+            els.forEach(el => {
+                if (el.scrollHeight > el.clientHeight) {
+                    result.containers.push({
+                        selector: sel,
+                        scrollHeight: el.scrollHeight,
+                        clientHeight: el.clientHeight
+                    });
+                }
+            });
+        }
+        return result;
+    }""")
+    return info
