@@ -1,0 +1,125 @@
+# 页面元素选择器配置
+# Clobus.uz OpenID 登录表单 + 1C Enterprise 主界面
+
+login:
+  # 登录页面选择器
+  url: "/a/acc314/53211/en/"
+  username_input: "input[name='openid.auth.user'], input#userName, input.authEditBox[type='text']"
+  password_input: "input[name='openid.auth.pwd'], input#userPassword"
+  submit_button: "input[type='submit']#submit_btn, input.enterButton"
+  remember_me: "input[name='openid.auth.short']"
+  error_message: ".error-message, .alert-danger, [class*='error'], .status-error"
+  success_indicator: "a[href*='logout'], button:contains('Выйти')"
+
+# 主导航菜单
+navigation:
+  menu_button: "[class*='hamburger'], [class*='menu-toggle'], .sidebar-toggle"
+  sidebar: "[class*='sidebar'], [class*='nav']"
+  # 1C Enterprise 8.3 界面选择器
+  main_pane: "#mainPane, [class*='main-pane']"
+  command_panel: "[class*='commandPanel'], [class*='navigation']"
+  status_bar: "[class*='statusBar'], #statusBar"
+
+  menu_items:
+    # 常见菜单项
+    customers: "a[href*='contr'], a[href*='partner'], [title*='Контраген'], [title*='Партнер']"
+    products: "a[href*='nomencl'], a[href*='product'], [title*='Номенклатур']"
+    orders: "a[href*='order'], a[href*='Заказ'], [title*='Заказы']"
+    warehouse: "a[href*='warehouse'], a[href*='склад'], [title*='Склад']"
+    reports: "a[href*='report'], a[href*='отчет'], [title*='Отчет']"
+    accounting: "a[href*='account'], a[href*='бухгалт'], [title*='Бухгалтер']"
+    documents: "a[href*='document'], [title*='Документ']"
+
+# 通用元素选择器
+common:
+  # 表格和数据网格
+  data_grid: "[class*='grid'], [class*='table'], [role='grid'], table.dataGrid"
+  table_rows: "tbody tr, [class*='row']"
+  table_cells: "td, [class*='cell']"
+
+  pagination:
+    container: "[class*='pagination'], [class*='pager']"
+    next_button: "button[title*='следующ'], button[title*='next'], [class*='nextPage']"
+    prev_button: "button[title*='предыдущ'], button[title*='prev'], [class*='prevPage']"
+    page_input: "input[type='number'][class*='page']"
+    total_pages: "[class*='total'], [class*='pages']"
+
+  # 筛选和搜索
+  search_input: "input[type='search'], input[placeholder*='поиск'], input[placeholder*='Поиск']"
+  filter_button: "button[title*='Фильтр'], [class*='filter']"
+  date_from: "input[name*='date'], input[id*='dateFrom'], [placeholder*='от']"
+  date_to: "input[name*='date'], input[id*='dateTo'], [placeholder*='до']"
+
+  # 操作按钮
+  export_button: "button[title*='Выгрузить'], button[title*='Export'], button[title*='Экспорт'], [class*='export']"
+  add_button: "button[title*='Добавить'], button[title*='Создать'], [class*='add']"
+  edit_button: "button[title*='Изменить'], [class*='edit']"
+  delete_button: "button[title*='Удалить'], [class*='delete']"
+  save_button: "button[title*='Сохранить'], button[title*='Save'], [class*='save']"
+
+  # 加载状态
+  loading_indicator: "[class*='spinner'], [class*='loading'], [class*='progress']"
+  no_data: "[class*='empty'], [class*='no-data'], .no-results"
+
+# 客户模块选择器
+customers:
+  list_url: "/e1cib/app/DataProcessor.Партнеры.ListForm"
+  list_container: "[class*='contragent'], [class*='partner'], table.dataGrid"
+  row:
+    name: "td:nth-child(1), [class*='name']"
+    inn: "td:nth-child(2), [class*='inn']"
+    phone: "td:nth-child(3), [class*='phone']"
+    email: "td:nth-child(4), [class*='email']"
+    address: "td:nth-child(5), [class*='address']"
+    actions: "[class*='action'] button"
+  detail_modal: "[class*='modal'], [class*='drawer'], [class*='form']"
+  bank_accounts_section: "[class*='bank'], [class*='account']"
+
+# 产品模块选择器
+products:
+  list_url: "/e1cib/app/Catalog.Номенклатура.ListForm"
+  list_container: "[class*='nomenclature'], [class*='product'], table.dataGrid"
+  row:
+    sku: "td:nth-child(1), [class*='article']"
+    name: "td:nth-child(2), [class*='name']"
+    unit: "td:nth-child(3), [class*='unit']"
+    price: "td:nth-child(4), [class*='price']"
+    quantity: "td:nth-child(5), [class*='quantity']"
+    actions: "[class*='action'] button"
+  categories_tree: "[class*='tree'], [class*='folder']"
+
+# 订单模块选择器
+orders:
+  list_url: "/e1cib/app/Document.ЗаказКлиента.ListForm"
+  list_container: "[class*='order'], [class*='document'], table.dataGrid"
+  row:
+    number: "td:nth-child(1), [class*='number']"
+    date: "td:nth-child(2), [class*='date']"
+    customer: "td:nth-child(3), [class*='customer']"
+    amount: "td:nth-child(4), [class*='amount']"
+    status: "td:nth-child(5), [class*='status']"
+    actions: "[class*='action'] button"
+
+# 库存模块选择器
+inventory:
+  list_url: "/e1cib/app/Report.СвободныеОстатки.ListForm"
+  list_container: "[class*='stock'], [class*='inventory'], table.dataGrid"
+  row:
+    product: "td:nth-child(1), [class*='product']"
+    warehouse: "td:nth-child(2), [class*='warehouse']"
+    quantity: "td:nth-child(3), [class*='quantity']"
+    reserved: "td:nth-child(4), [class*='reserved']"
+    available: "td:nth-child(5), [class*='available']"
+
+# 财务报表选择器
+reports:
+  list_url: "/e1cib/app/Report.*"
+  balance_sheet:
+    url: "/e1cib/app/Report.БухгалтерскийОтчет"
+    assets: "[class*='asset'], [class*='актив']"
+    liabilities: "[class*='liabilit'], [class*='пассив']"
+  profit_loss:
+    url: "/e1cib/app/Report.ОтчетОПрибыляхИУбытках"
+    revenue: "[class*='revenue'], [class*='доход']"
+    expenses: "[class*='expense'], [class*='расход']"
+    profit: "[class*='profit'], [class*='прибыль']"

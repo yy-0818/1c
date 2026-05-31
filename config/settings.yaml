@@ -1,0 +1,27 @@
+# Clobus 登录配置
+clobus:
+  url: "https://clobus.uz"
+  username: "Guzalruz_2577@mail.ru"
+  password: "fUnu2ru"
+
+# Supabase 连接配置
+supabase:
+  url: "https://hgmwemfmrwkdwbbsdegk.supabase.co"
+  anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhnbXdlbWZtcndrZHdic2RlZ2siLCJyb2xlIjoiYW5vbiIsImlhdCI6MTY0ODEwNjE5MywiZXhwIjoxOTYzNjgyMTkzfQ.example"
+  service_key: ""
+
+# 爬虫配置
+scraper:
+  headless: false  # 开发阶段设为false以便调试
+  timeout: 60000   # 60秒超时
+  retry_count: 3
+  delay_between_pages: 2  # 秒
+  delay_between_actions: 0.5  # 操作间延迟
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# 日志配置
+logging:
+  level: "INFO"
+  file: "logs/scraper.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
