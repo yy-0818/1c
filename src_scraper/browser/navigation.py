@@ -557,6 +557,105 @@ class NavigationHelper:
             self.logger.error(f"JS展开失败: {e}")
             return 0
 
+    async def go_to_next_page(self) -> bool:
+        """
+        点击下一页按钮
+
+        Returns:
+            是否成功跳转
+        """
+        try:
+            # 查找下一页按钮
+            next_btn = await self.page.query_selector(
+                'button[title*="следующ"], '  # 俄语"下一页"
+                'button[title*="next"], '     # 英语"下一页"
+                'button[title*="Следущ"], '   # 变体
+                '.gridPagerNext, '             # 1C网格分页
+                '.pagination-next, '
+                '[class*="pagerNext"], '
+                '[class*="nextPage"]'
+            )
+
+            if not next_btn:
+                self.logger.info("未找到下一页按钮")
+                return False
+
+            # 检查是否禁用
+            is_disabled = await next_btn.get_attribute("disabled")
+            if is_disabled is not None:
+                self.logger.info("下一页按钮已禁用")
+                return False
+
+            # 点击
+            self.logger.info("点击下一页...")
+            await next_btn.click()
+            await asyncio.sleep(1.5)  # 等待数据加载
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"下一页点击失败: {e}")
+            return False
+
+    async def has_next_page(self) -> bool:
+        """
+        检查是否有下一页
+
+        Returns:
+            是否有下一页
+        """
+        try:
+            next_btn = await self.page.query_selector(
+                'button[title*="следующ"], '
+                'button[title*="next"], '
+                '.gridPagerNext, '
+                '[class*="pagerNext"], '
+                '[class*="nextPage"]'
+            )
+
+            if not next_btn:
+                return False
+
+            is_disabled = await next_btn.get_attribute("disabled")
+            return is_disabled is None
+
+        except Exception:
+            return False
+
+    async def get_current_page_info(self) -> Dict[str, Any]:
+        """
+        获取当前页信息
+
+        Returns:
+            页码信息
+        """
+        try:
+            info = await self.page.evaluate("""() => {
+                // 查找分页信息
+                const pager = document.querySelector('.gridPager, [class*="pager"], .pagination');
+                if (!pager) return { total: 1, current: 1 };
+
+                const text = pager.innerText || pager.textContent || '';
+
+                // 尝试解析 "第 X 页，共 Y 页" 或 "X / Y"
+                const match = text.match(/(\\d+)\\s*[/\\|]\\s*(\\d+)/) ||
+                              text.match(/страница\\s*(\\d+).*?(\\d+)/i) ||
+                              text.match(/page\\s*(\\d+).*?(\\d+)/i);
+
+                if (match) {
+                    return { current: parseInt(match[1]), total: parseInt(match[2]) };
+                }
+
+                // 查找页码按钮
+                const pageButtons = pager.querySelectorAll('button:not([disabled])');
+                return { total: pageButtons.length, current: 1 };
+            }""")
+
+            return info
+
+        except Exception as e:
+            return {"current": 1, "total": 1}
+
 
 def create_navigation_helper(page: Page) -> NavigationHelper:
     """创建导航辅助实例"""

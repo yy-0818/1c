@@ -66,13 +66,13 @@ async def interactive_mode():
             if choice == "0":
                 break
             elif choice == "1":
-                await run_sync(driver, "customers", skip_login=True)
+                await run_sync(driver, "customers", skip_login=True, keep_browser_open=True)
             elif choice == "2":
-                await run_sync(driver, "products", skip_login=True)
+                await run_sync(driver, "products", skip_login=True, keep_browser_open=True)
             elif choice == "3":
-                await run_sync(driver, "orders", skip_login=True)
+                await run_sync(driver, "orders", skip_login=True, keep_browser_open=True)
             elif choice == "4":
-                await run_sync(driver, "all", skip_login=True)
+                await run_sync(driver, "all", skip_login=True, keep_browser_open=True)
             elif choice == "5":
                 path = await driver.screenshot("manual_screenshot.png")
                 print(f"截图已保存: {path}")
@@ -95,14 +95,21 @@ async def interactive_mode():
             await driver.close()
 
 
-async def run_sync(driver: BrowserDriver, task: str, skip_login: bool = False):
-    """运行数据同步"""
+async def run_sync(driver: BrowserDriver, task: str, skip_login: bool = False, keep_browser_open: bool = False):
+    """运行数据同步
+
+    Args:
+        driver: 浏览器驱动
+        task: 任务类型
+        skip_login: 是否跳过登录检查
+        keep_browser_open: 是否保持浏览器打开
+    """
     print(f"\n正在同步 {task}...")
-    
+
     try:
         coordinator = ScraperCoordinator(driver=driver, skip_login_check=skip_login)
         await coordinator.__aenter__()
-        
+
         if task == "all":
             result = await coordinator.scrape_all()
         elif task == "customers":
@@ -113,28 +120,37 @@ async def run_sync(driver: BrowserDriver, task: str, skip_login: bool = False):
             result = await coordinator.scrape_orders()
         else:
             result = {"success": False, "error": "未知任务"}
-        
-        await coordinator.__aexit__(None, None, None)
-        
+
+        # 只有在需要时才关闭浏览器
+        if not keep_browser_open:
+            await coordinator.__aexit__(None, None, None)
+
         if result.get('success'):
             print(f"\n✅ {task} 同步成功!")
             # 显示正确的记录数
             if 'results' in result:
                 for name, r in result['results'].items():
                     count = r.get('count', 0)
-                    print(f"  {name}: {count} 条")
+                    pages = r.get('pages', 1)
+                    print(f"  {name}: {count} 条 (共 {pages} 页)")
                     if r.get('data'):
                         print(f"    数据已保存")
             else:
                 count = result.get('count', 0)
-                print(f"  总记录数: {count} 条")
+                pages = result.get('pages', 1)
+                print(f"  总记录数: {count} 条 (共 {pages} 页)")
                 if result.get('data'):
                     print(f"    数据已保存")
         else:
             print(f"\n❌ {task} 同步失败: {result.get('error', '未知错误')}")
-            
+
     except Exception as e:
         print(f"\n❌ 同步出错: {e}")
+        if not keep_browser_open:
+            try:
+                await coordinator.__aexit__(None, None, None)
+            except:
+                pass
 
 
 def main():
