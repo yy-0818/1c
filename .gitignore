@@ -11,9 +11,8 @@ venv/
 .venv/
 env/
 
-# Node
+# Node modules
 node_modules/
-.web/**
 
 # IDE
 .idea/
@@ -25,14 +24,19 @@ node_modules/
 *.log
 logs/
 
-# Data
-data/*.json
-data/*.png
+# Data directory - ALL files in data/ are excluded
+data/
+data_debug/
+screenshots/
+
+# Session files
 *.session
+session.json
 
 # Environment
 .env
 .env.local
+.env.*.local
 
 # OS
 .DS_Store
@@ -41,3 +45,8 @@ Thumbs.db
 # Build
 dist/
 .cache/
+.web/
+
+# Temporary files
+*.tmp
+*.bak
