@@ -892,38 +892,58 @@ class NavigationHelper:
             self.logger.error(f"调试分页失败: {e}")
             return {}
 
+    async def debug_scroll_container(self) -> Dict[str, Any]:
+        """调试查找可滚动的grid容器"""
+        try:
+            info = await self.page.evaluate("""() => {
+                const result = { containers: [], rows: 0 };
+
+                // 获取所有grid行数
+                result.rows = document.querySelectorAll('.gridLine').length;
+
+                // 查找可能的滚动容器
+                const selectors = [
+                    '.gridBody',
+                    '.gridBody > div',
+                    '[class*="gridBody"]',
+                    '[class*="GridBody"]',
+                    '[class*="dataGrid"]',
+                    '[class*="DataGrid"]',
+                    '[class*="gridContainer"]',
+                    'table[class*="grid"]'
+                ];
+
+                for (const sel of selectors) {
+                    const els = document.querySelectorAll(sel);
+                    els.forEach(el => {
+                        if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) {
+                            result.containers.push({
+                                selector: sel,
+                                tag: el.tagName,
+                                className: el.className.substring(0, 100),
+                                scrollHeight: el.scrollHeight,
+                                clientHeight: el.clientHeight,
+                                scrollTop: el.scrollTop,
+                                canScroll: el.scrollHeight > el.clientHeight
+                            });
+                        }
+                    });
+                }
+
+                return result;
+            }""")
+
+            self.logger.info("=== Grid滚动容器调试 ===")
+            self.logger.info(f"当前行数: {info.get('rows')}")
+            self.logger.info(f"可滚动容器: {info.get('containers')}")
+
+            return info
+
+        except Exception as e:
+            self.logger.error(f"调试滚动容器失败: {e}")
+            return {}
+
 
 def create_navigation_helper(page: Page) -> NavigationHelper:
     """创建导航辅助实例"""
     return NavigationHelper(page)
-
-
-# 调试工具：在页面加载后调用此函数查找滚动容器
-async def debug_grid_scroll(page):
-    """调试grid滚动容器（独立函数）"""
-    info = await page.evaluate("""() => {
-        const result = { containers: [], rows: 0 };
-        result.rows = document.querySelectorAll('.gridLine').length;
-
-        const selectors = [
-            '.gridBody',
-            '.gridBody > div',
-            '[class*="gridBody"]',
-            '[class*="dataGrid"]'
-        ];
-
-        for (const sel of selectors) {
-            const els = document.querySelectorAll(sel);
-            els.forEach(el => {
-                if (el.scrollHeight > el.clientHeight) {
-                    result.containers.push({
-                        selector: sel,
-                        scrollHeight: el.scrollHeight,
-                        clientHeight: el.clientHeight
-                    });
-                }
-            });
-        }
-        return result;
-    }""")
-    return info
