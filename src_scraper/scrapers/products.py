@@ -59,11 +59,15 @@ class ProductScraper(PaginationScraper):
                 else:
                     self.logger.info(f"第 {page_num} 页无数据")
 
-                # 检查是否有下一页
-                has_next = await self.nav.has_next_page()
-                if not has_next:
-                    self.logger.info("已到达最后一页")
-                    break
+            # 检查是否有下一页
+            has_next = await self.nav.has_next_page()
+            if not has_next:
+                self.logger.info("已到达最后一页")
+                break
+
+            # 调试分页信息
+            if page_num == 1:
+                await self.nav.debug_pagination()
 
                 # 点击下一页
                 success = await self.nav.go_to_next_page()
