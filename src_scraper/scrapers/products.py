@@ -1,135 +1,144 @@
 """产品数据抓取模块"""
 import asyncio
+import re
 from datetime import datetime
-from typing import Any, Dict, List
-from uuid import uuid4
-
-from playwright.async_api import ElementHandle
+from typing import Any, Dict, List, Optional
 
 from ..scrapers.base import PaginationScraper
-from ..parsers.html_parser import DataCleaner, clean_and_validate
+from ..browser.navigation import create_navigation_helper, NavigationHelper
 from ..utils.logger import get_logger
 
 logger = get_logger("products")
 
 
 class ProductScraper(PaginationScraper):
-    """产品数据抓取器"""
+    """产品数据抓取器 - 支持1C云版本侧边栏导航"""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.cleaner = DataCleaner()
-        self.list_url = self.selectors.get('products', {}).get('list_url', '')
+        self.nav: Optional[NavigationHelper] = None
 
     async def scrape(self, **kwargs) -> Dict[str, Any]:
-        """
-        抓取产品数据
-
-        Args:
-            incremental: 是否增量抓取
-            max_pages: 最大页数
-
-        Returns:
-            Dict包含 success, count, data, errors
-        """
+        """抓取产品数据"""
         self.logger.info("开始抓取产品数据")
 
-        if not self.list_url:
-            self.logger.warning("未配置产品列表URL")
-            return {"success": False, "count": 0, "data": [], "errors": ["未配置URL"]}
-
-        # 构建完整URL
-        base_url = self.config.clobus.url
-        if not self.list_url.startswith('http'):
-            full_url = f"{base_url}{self.list_url}" if self.list_url.startswith('/') else f"{base_url}/{self.list_url}"
-        else:
-            full_url = self.list_url
-
-        self.logger.info(f"抓取URL: {full_url}")
-
-        result = await self.scrape_with_pagination(
-            url=full_url,
-            rows_selector="table.dataGrid tbody tr, [class*='row']",
-            parse_row_func=self._parse_product_row,
-            max_pages=kwargs.get('max_pages', 100)
-        )
-
-        if result['success'] and result['data']:
-            cleaned_data = []
-            for item in result['data']:
-                validated = clean_and_validate(item, self._get_schema())
-                if validated.get('description'):
-                    cleaned_data.append(validated)
-
-            result['data'] = cleaned_data
-            result['count'] = len(cleaned_data)
-
-            if self.store and kwargs.get('save', True):
-                await self._save_to_supabase(cleaned_data)
-
-        return result
-
-    async def _parse_product_row(self, row: ElementHandle) -> Dict[str, Any]:
-        """解析产品行"""
-        data = {}
-
         try:
-            cells = await row.query_selector_all('td')
-            if not cells:
-                return data
+            # 初始化导航辅助
+            self.nav = create_navigation_helper(self.driver.page)
 
-            for i, cell in enumerate(cells):
-                text = await cell.inner_text()
-                text = self.cleaner.clean_text(text)
+            # 通过侧边栏导航到产品模块
+            success = await self.nav.navigate_to("products")
+            if not success:
+                self.logger.error("无法导航到产品模块")
+                return {"success": False, "count": 0, "data": [], "errors": ["导航失败"]}
 
-                link = await cell.query_selector('a')
-                if link:
-                    href = await link.get_attribute('href') or ""
-                    import re
-                    ref_match = re.search(r'ref=(.*?)(&|$)', href)
-                    if ref_match:
-                        data['ref_key'] = ref_match.group(1)
+            # 等待数据加载
+            await asyncio.sleep(3)
 
-                if i == 0:
-                    data['article'] = text
-                    if not data.get('ref_key'):
-                        data['ref_key'] = str(uuid4())
-                elif i == 1:
-                    data['description'] = text
-                elif i == 2:
-                    data['unit_name'] = text
-                elif i == 3:
-                    data['product_type'] = text
+            # 截图诊断
+            await self.screenshot("products_list.png")
 
-            data['last_synced_at'] = datetime.utcnow().isoformat()
+            # 提取数据
+            result = await self._extract_products()
+
+            if result.get('data') and hasattr(self.store, 'upsert_products'):
+                self.store.upsert_products(result['data'])
+                self.logger.info(f"成功抓取 {result['count']} 条产品数据")
+
+            return result
 
         except Exception as e:
-            self.logger.debug(f"解析行失败: {e}")
+            self.logger.error(f"抓取出错: {e}")
+            await self.screenshot("products_error.png")
+            return {"success": False, "count": 0, "data": [], "errors": [str(e)]}
 
-        return data
+    async def _extract_products(self) -> Dict[str, Any]:
+        """从页面提取产品数据"""
+        all_data = []
 
-    def _get_schema(self) -> Dict[str, str]:
-        """获取数据验证schema"""
+        # 使用与customers相同的grid提取方法
+        js_data = await self._extract_grid_data()
+        if js_data:
+            self.logger.info(f"JS提取到 {len(js_data)} 条数据")
+            all_data.extend(js_data)
+
+        # 去重
+        seen = set()
+        unique_data = []
+        for product in all_data:
+            key = product.get('name', '') + product.get('article', '')
+            if key and key not in seen:
+                seen.add(key)
+                unique_data.append(product)
+
         return {
-            'ref_key': 'text',
-            'article': 'text',
-            'description': 'text',
-            'description_full': 'text',
-            'unit_name': 'text',
-            'product_type': 'text',
-            'parent_key': 'text',
-            'deletion_mark': 'bool'
+            "success": True,
+            "count": len(unique_data),
+            "data": unique_data
         }
 
-    async def _save_to_supabase(self, products: List[Dict]) -> Dict[str, Any]:
-        """保存到Supabase"""
-        if not products:
-            return {"count": 0}
-
+    async def _extract_grid_data(self) -> List[Dict[str, Any]]:
+        """从1C的gridBody提取产品数据"""
         try:
-            result = self.store.upsert_products(products)
-            self.logger.info(f"已保存 {len(products)} 个产品到Supabase")
-            return result
+            # 等待gridBody加载
+            await asyncio.sleep(5)
+
+            # 检查gridBody状态
+            grid_check = await self.driver.page.evaluate("""() => {
+                const gridBody = document.querySelector('.gridBody');
+                if (!gridBody) return { error: 'No gridBody' };
+                const lines = gridBody.querySelectorAll('.gridLine');
+                return { lines: lines.length };
+            }""")
+
+            self.logger.info(f"Grid检查: {grid_check}")
+
+            if grid_check.get('error'):
+                return []
+
+            # 使用Playwright方法提取数据
+            all_data = []
+            grid_lines = await self.driver.page.query_selector_all(".gridLine")
+            self.logger.info(f"找到 {len(grid_lines)} 行")
+
+            for idx, line in enumerate(grid_lines):
+                try:
+                    # 获取所有gridBox
+                    grid_boxes = await line.query_selector_all(".gridBox")
+                    cell_texts = []
+                    for box in grid_boxes:
+                        text = await box.inner_text()
+                        cell_texts.append(text.strip())
+
+                    # 检查是否有内容
+                    has_content = any(t and len(t) > 0 for t in cell_texts)
+
+                    if not has_content:
+                        continue
+
+                    # 解析产品数据
+                    # 通常结构: 代码, 名称(Description), 单元(Единица), 单位(Unit)
+                    name = cell_texts[1] if len(cell_texts) > 1 else cell_texts[0]
+                    name = name.strip('"\'').strip()
+
+                    if name and len(name) > 0:
+                        # 排除表头行
+                        if name.lower() not in ['description', 'наименование', 'код', 'артикул']:
+                            all_data.append({
+                                'name': name,
+                                'article': cell_texts[2] if len(cell_texts) > 2 else '',
+                                'code': cell_texts[0] if cell_texts else '',
+                                'unit': cell_texts[3] if len(cell_texts) > 3 else '',
+                                'ref_key': '',
+                                'synced_at': datetime.now().isoformat()
+                            })
+
+                except Exception as e:
+                    self.logger.debug(f"解析行 {idx} 失败: {e}")
+                    continue
+
+            return all_data
+
         except Exception as e:
-            self.logger.error(f"保存产品失败: {e}")
-            return {"error": str(e)}
+            self.logger.error(f"提取失败: {e}")
+            return []

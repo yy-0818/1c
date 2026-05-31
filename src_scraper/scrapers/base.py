@@ -4,14 +4,19 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from ..browser.driver import BrowserDriver
-from ..storage.supabase_store import SupabaseStore, get_store
 from ..utils.logger import get_logger
+
+
+def get_store():
+    """获取存储实例 - 强制使用本地存储"""
+    from ..storage.local_store import LocalStore
+    return LocalStore()
 
 
 class BaseScraper(ABC):
     """抓取器基类"""
 
-    def __init__(self, driver: BrowserDriver, store: Optional[SupabaseStore] = None):
+    def __init__(self, driver: BrowserDriver, store=None):
         self.driver = driver
         self.store = store or get_store()
         self.logger = get_logger(self.__class__.__name__)
@@ -57,152 +62,125 @@ class BaseScraper(ABC):
         except Exception:
             return []
 
-    async def click(self, selector: str) -> bool:
-        """点击元素"""
-        element = await self.find_element(selector)
-        if element:
-            await element.click()
-            await asyncio.sleep(0.5)
-            return True
-        return False
+    async def screenshot(self, name: str) -> str:
+        """截图"""
+        return await self.driver.screenshot(name)
 
-    async def get_text(self, selector: str) -> Optional[str]:
-        """获取元素文本"""
-        element = await self.find_element(selector)
-        if element:
-            return await element.inner_text()
-        return None
 
-    async def get_attribute(self, selector: str, attr: str) -> Optional[str]:
-        """获取元素属性"""
-        element = await self.find_element(selector)
-        if element:
-            return await element.get_attribute(attr)
-        return None
+class PaginationScraper(BaseScraper, ABC):
+    """带分页的抓取器基类"""
 
-    async def navigate_to(self, url: str) -> bool:
-        """导航到URL"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.current_page = 1
+        self.max_pages = 100
+        self.total_pages = 1
+
+    async def navigate_with_pagination(self, url: str, page: int = 1) -> bool:
+        """
+        带分页的导航
+        
+        Args:
+            url: 基础URL
+            page: 页码（从1开始）
+            
+        Returns:
+            是否导航成功
+        """
+        page_param = f"page={page}" if "?" in url else f"?page={page}"
+        full_url = f"{url}{page_param}" if page == 1 else f"{url.split('?')[0]}{page_param}"
+        
         try:
-            await self.driver.page.goto(url, wait_until="domcontentloaded")
-            await asyncio.sleep(1)
+            await self.driver.page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
+            self.current_page = page
             return True
         except Exception as e:
             self.logger.error(f"导航失败: {e}")
             return False
 
-    async def take_screenshot(self, name: str) -> str:
-        """截图"""
-        path = f"data/{name}.png"
-        await self.driver.screenshot(path)
-        return path
-
-
-class PaginationScraper(BaseScraper):
-    """支持分页的抓取器基类"""
-
     async def scrape_with_pagination(
         self,
         url: str,
         rows_selector: str,
-        parse_row_func,  # 解析每一行的函数
-        page_size: int = 100,
-        max_pages: int = 100
+        parse_row_func,
+        max_pages: int = 100,
+        **kwargs
     ) -> Dict[str, Any]:
-        """分页抓取"""
+        """
+        带分页的抓取
+
+        Args:
+            url: 列表页URL
+            rows_selector: 行选择器
+            parse_row_func: 解析每行的函数
+            max_pages: 最大页数
+
+        Returns:
+            Dict包含 success, count, data
+        """
         all_data = []
         errors = []
-        current_page = 1
+        self.max_pages = max_pages
 
-        self.logger.info(f"开始分页抓取: {url}")
+        self.logger.info(f"开始抓取: {url}")
 
-        # 导航到列表页
-        if not await self.navigate_to(url):
-            return {
-                "success": False,
-                "count": 0,
-                "data": [],
-                "errors": ["无法导航到页面"]
-            }
+        for page in range(1, max_pages + 1):
+            self.logger.info(f"抓取第 {page} 页...")
 
-        await self.wait_for_load()
+            # 导航到页面
+            if page > 1:
+                success = await self.navigate_with_pagination(url, page)
+                if not success:
+                    errors.append(f"第 {page} 页导航失败")
+                    break
 
-        while current_page <= max_pages:
-            self.logger.info(f"抓取第 {current_page} 页...")
+            await asyncio.sleep(2)
 
-            # 等待数据加载
-            try:
-                await self.driver.page.wait_for_selector(rows_selector, timeout=10000)
-            except Exception:
-                self.logger.warning(f"第 {current_page} 页未找到数据")
-                break
-
-            # 获取当前页数据
+            # 检查是否为空页
             rows = await self.find_elements(rows_selector)
             if not rows:
-                self.logger.info("没有更多数据")
+                self.logger.info(f"第 {page} 页无数据，停止")
                 break
 
+            # 解析数据
+            page_data = []
             for row in rows:
                 try:
-                    data = await parse_row_func(row)
-                    if data:
-                        all_data.append(data)
+                    item = await parse_row_func(row)
+                    if item:
+                        page_data.append(item)
                 except Exception as e:
-                    errors.append(str(e))
                     self.logger.debug(f"解析行失败: {e}")
 
-            self.logger.info(f"第 {current_page} 页完成，已抓取 {len(all_data)} 条")
+            if page_data:
+                all_data.extend(page_data)
+                self.logger.info(f"第 {page} 页: 获取 {len(page_data)} 条")
+            else:
+                self.logger.info(f"第 {page} 页无有效数据")
 
             # 检查是否有下一页
-            if not await self._has_next_page():
+            has_next = await self._check_next_page()
+            if not has_next:
+                self.logger.info("已到达最后一页")
                 break
-
-            # 点击下一页
-            if not await self._click_next_page():
-                break
-
-            current_page += 1
-            await asyncio.sleep(1)  # 避免请求过快
 
         return {
             "success": True,
             "count": len(all_data),
             "data": all_data,
-            "errors": errors,
-            "total_pages": current_page
+            "errors": errors if errors else None
         }
 
-    async def _has_next_page(self) -> bool:
+    async def _check_next_page(self) -> bool:
         """检查是否有下一页"""
-        next_selectors = [
-            "button[title*='следующ']",
-            "button[title*='next']",
-            "button[title*='Next']",
-            "[class*='nextPage']",
-            "[class*='next']"
-        ]
-        for sel in next_selectors:
-            element = await self.find_element(sel)
-            if element:
-                is_disabled = await element.get_attribute("disabled")
+        try:
+            # 检查分页按钮
+            next_buttons = await self.find_elements("button[title*='следующ'], button[title*='next']")
+            for btn in next_buttons:
+                is_disabled = await btn.get_attribute("disabled")
                 if is_disabled is None:
                     return True
-        return False
-
-    async def _click_next_page(self) -> bool:
-        """点击下一页"""
-        next_selectors = [
-            "button[title*='следующ']",
-            "button[title*='next']",
-            "button[title*='Next']",
-            "[class*='nextPage']"
-        ]
-        for sel in next_selectors:
-            element = await self.find_element(sel)
-            if element:
-                is_disabled = await element.get_attribute("disabled")
-                if is_disabled is None:
-                    await element.click()
-                    await asyncio.sleep(1)
-                    return True
-        return False
+            return False
+        except Exception:
+            return False

@@ -1,11 +1,11 @@
 """主爬虫协调器"""
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ..browser.driver import BrowserDriver
 from ..browser.auth import AuthManager
-from ..storage.supabase_store import SupabaseStore, get_store
+from ..storage.local_store import LocalStore, get_local_store
 from ..scrapers.customers import CustomerScraper
 from ..scrapers.products import ProductScraper
 from ..scrapers.orders import OrderScraper
@@ -14,18 +14,28 @@ from ..utils.logger import get_logger
 logger = get_logger("coordinator")
 
 
+def get_store():
+    """获取存储实例 - 强制使用本地存储"""
+    logger.info("使用本地存储")
+    return get_local_store()
+
+
 class ScraperCoordinator:
     """爬虫协调器 - 管理所有抓取任务"""
 
     def __init__(
         self,
         driver: Optional[BrowserDriver] = None,
-        store: Optional[SupabaseStore] = None
+        store: Optional[LocalStore] = None,
+        skip_login_check: bool = False,
+        close_driver_on_exit: bool = True
     ):
         self.driver = driver
         self.store = store or get_store()
         self.auth = None
         self.scrapers = {}
+        self._skip_login_check = skip_login_check
+        self._close_driver_on_exit = close_driver_on_exit
 
     async def __aenter__(self):
         if self.driver is None:
@@ -35,7 +45,6 @@ class ScraperCoordinator:
 
         self.auth = AuthManager(self.driver)
 
-        # 初始化抓取器
         self.scrapers = {
             'customers': CustomerScraper(self.driver, self.store),
             'products': ProductScraper(self.driver, self.store),
@@ -45,17 +54,22 @@ class ScraperCoordinator:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.driver:
+        if self._close_driver_on_exit and self.driver:
             await self.driver.close()
 
     async def ensure_logged_in(self) -> bool:
         """确保已登录"""
-        # 检查会话是否有效
-        if await self.driver.is_logged_in():
-            logger.info("会话有效，跳过登录")
+        if self._skip_login_check:
+            logger.info("跳过登录检查（交互模式已验证）")
+            return True
+        
+        if self.driver is None:
+            return False
+
+        if self.driver.is_current_page_logged_in():
+            logger.info("当前页面已登录")
             return True
 
-        # 尝试登录
         try:
             return await self.auth.login()
         except Exception as e:
@@ -72,40 +86,27 @@ class ScraperCoordinator:
                 "errors": ["登录失败"]
             }
 
-        # 同步日志ID
         sync_id = self.store.start_sync("all", mode="full")
 
         try:
-            # 抓取客户
             logger.info("=" * 40)
             logger.info("开始抓取客户数据")
             logger.info("=" * 40)
             results['customers'] = await self.scrapers['customers'].scrape(**kwargs)
 
-            # 抓取产品
             logger.info("=" * 40)
             logger.info("开始抓取产品数据")
             logger.info("=" * 40)
             results['products'] = await self.scrapers['products'].scrape(**kwargs)
 
-            # 抓取订单
             logger.info("=" * 40)
             logger.info("开始抓取订单数据")
             logger.info("=" * 40)
             results['orders'] = await self.scrapers['orders'].scrape(**kwargs)
 
-            # 计算总数
             total = sum(r.get('count', 0) for r in results.values())
 
-            # 完成同步日志
-            self.store.complete_sync(
-                sync_id,
-                processed=total,
-                created=total,
-                updated=0,
-                deleted=0,
-                failed=len([r for r in results.values() if not r.get('success')])
-            )
+            self.store.end_sync(sync_id, success=True, records_synced=total)
 
             return {
                 "success": True,
@@ -115,7 +116,7 @@ class ScraperCoordinator:
 
         except Exception as e:
             logger.error(f"抓取出错: {e}")
-            self.store.fail_sync(sync_id, str(e))
+            self.store.end_sync(sync_id, success=False)
             return {
                 "success": False,
                 "error": str(e),
@@ -127,17 +128,15 @@ class ScraperCoordinator:
         if not await self.ensure_logged_in():
             return {"success": False, "error": "登录失败"}
 
-        sync_id = self.store.start_sync("customers")
+        sync_id = self.store.start_sync("customers", mode="incremental")
+
         try:
             result = await self.scrapers['customers'].scrape(**kwargs)
-            self.store.complete_sync(
-                sync_id,
-                processed=result.get('count', 0),
-                created=result.get('count', 0)
-            )
-            return result
+            self.store.end_sync(sync_id, success=True, records_synced=result.get('count', 0))
+            return {"success": True, **result}
         except Exception as e:
-            self.store.fail_sync(sync_id, str(e))
+            logger.error(f"抓取客户出错: {e}")
+            self.store.end_sync(sync_id, success=False)
             return {"success": False, "error": str(e)}
 
     async def scrape_products(self, **kwargs) -> Dict[str, Any]:
@@ -145,17 +144,15 @@ class ScraperCoordinator:
         if not await self.ensure_logged_in():
             return {"success": False, "error": "登录失败"}
 
-        sync_id = self.store.start_sync("products")
+        sync_id = self.store.start_sync("products", mode="incremental")
+
         try:
             result = await self.scrapers['products'].scrape(**kwargs)
-            self.store.complete_sync(
-                sync_id,
-                processed=result.get('count', 0),
-                created=result.get('count', 0)
-            )
-            return result
+            self.store.end_sync(sync_id, success=True, records_synced=result.get('count', 0))
+            return {"success": True, **result}
         except Exception as e:
-            self.store.fail_sync(sync_id, str(e))
+            logger.error(f"抓取产品出错: {e}")
+            self.store.end_sync(sync_id, success=False)
             return {"success": False, "error": str(e)}
 
     async def scrape_orders(self, **kwargs) -> Dict[str, Any]:
@@ -163,17 +160,15 @@ class ScraperCoordinator:
         if not await self.ensure_logged_in():
             return {"success": False, "error": "登录失败"}
 
-        sync_id = self.store.start_sync("orders")
+        sync_id = self.store.start_sync("orders", mode="incremental")
+
         try:
             result = await self.scrapers['orders'].scrape(**kwargs)
-            self.store.complete_sync(
-                sync_id,
-                processed=result.get('count', 0),
-                created=result.get('count', 0)
-            )
-            return result
+            self.store.end_sync(sync_id, success=True, records_synced=result.get('count', 0))
+            return {"success": True, **result}
         except Exception as e:
-            self.store.fail_sync(sync_id, str(e))
+            logger.error(f"抓取订单出错: {e}")
+            self.store.end_sync(sync_id, success=False)
             return {"success": False, "error": str(e)}
 
     def get_stats(self) -> Dict[str, Any]:
