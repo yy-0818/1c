@@ -700,7 +700,7 @@ class NavigationHelper:
             self.logger.debug(f"获取页码信息失败: {e}")
             return {"current": 1, "total": 1}
 
-    async def scroll_to_load_all(self, max_scrolls: int = 100, scroll_delay: float = 1.5) -> Dict[str, Any]:
+    async def scroll_to_load_all(self, max_scrolls: int = 100, scroll_delay: float = 2.0) -> Dict[str, Any]:
         """
         滚动表格加载所有数据
 
@@ -729,6 +729,7 @@ class NavigationHelper:
 
             last_row_count = initial_rows
             no_change_count = 0
+            max_rows_seen = initial_rows
 
             # 找到gridBody元素并聚焦
             await self.page.evaluate("""() => {
@@ -739,11 +740,15 @@ class NavigationHelper:
             }""")
 
             for i in range(max_scrolls):
-                # 方法1: 使用 PageDown 键（更接近用户操作）
-                await self.page.keyboard.press('PageDown')
-                await asyncio.sleep(scroll_delay)
+                # 滚动前记录当前最后一行
+                last_before = await self.page.evaluate("""() => {
+                    const lines = document.querySelectorAll('.gridLine');
+                    if (lines.length === 0) return null;
+                    const last = lines[lines.length - 1];
+                    return last.getAttribute('rowindex');
+                }""")
 
-                # 方法2: 尝试滚动到最底部
+                # 滚动到底部
                 await self.page.evaluate("""() => {
                     const gridBody = document.querySelector('.gridBody');
                     if (gridBody) {
@@ -751,11 +756,29 @@ class NavigationHelper:
                     }
                 }""")
 
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(scroll_delay)
+
+                # 再次滚动确保触发加载
+                await self.page.evaluate("""() => {
+                    const gridBody = document.querySelector('.gridBody');
+                    if (gridBody) {
+                        gridBody.scrollTop = gridBody.scrollHeight;
+                    }
+                }""")
+
+                await asyncio.sleep(scroll_delay)
 
                 # 检查当前行数
                 current_rows = await self.page.evaluate("""() => {
                     return document.querySelectorAll('.gridLine').length;
+                }""")
+
+                # 获取最后一行索引
+                last_after = await self.page.evaluate("""() => {
+                    const lines = document.querySelectorAll('.gridLine');
+                    if (lines.length === 0) return null;
+                    const last = lines[lines.length - 1];
+                    return last.getAttribute('rowindex');
                 }""")
 
                 result["scroll_count"] = i + 1
@@ -764,17 +787,20 @@ class NavigationHelper:
                 if current_rows > last_row_count:
                     new_rows = current_rows - last_row_count
                     result["new_rows_loaded"] += new_rows
-                    self.logger.info(f"滚动 {i + 1}: 新增 {new_rows} 行 (总计 {current_rows})")
+                    self.logger.info(f"滚动 {i + 1}: 新增 {new_rows} 行 (总计 {current_rows}, 最后索引: {last_after})")
                     last_row_count = current_rows
+                    max_rows_seen = current_rows
                     no_change_count = 0
-                else:
+                elif current_rows == last_row_count:
                     no_change_count += 1
-                    self.logger.info(f"滚动 {i + 1}: 行数未变化 ({current_rows})，连续 {no_change_count} 次")
+                    self.logger.info(f"滚动 {i + 1}: 行数未变化 ({current_rows})，最后索引: {last_after}，连续 {no_change_count} 次")
 
-                    # 连续10次行数不变，停止
-                    if no_change_count >= 10:
+                    # 连续15次行数不变，停止
+                    if no_change_count >= 15:
                         self.logger.info("连续多次行数未变化，已加载全部数据")
                         break
+                else:
+                    self.logger.warning(f"滚动 {i + 1}: 行数减少 {current_rows}")
 
             self.logger.info(f"滚动加载完成: 共滚动 {result['scroll_count']} 次, 最终 {result['total_rows']} 行")
 
