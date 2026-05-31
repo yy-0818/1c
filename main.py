@@ -118,10 +118,18 @@ async def run_sync(driver: BrowserDriver, task: str, skip_login: bool = False):
         
         if result.get('success'):
             print(f"\n✅ {task} 同步成功!")
-            print(f"总记录数: {result.get('total', 0)}")
+            # 显示正确的记录数
             if 'results' in result:
                 for name, r in result['results'].items():
-                    print(f"  {name}: {r.get('count', 0)} 条")
+                    count = r.get('count', 0)
+                    print(f"  {name}: {count} 条")
+                    if r.get('data'):
+                        print(f"    数据已保存")
+            else:
+                count = result.get('count', 0)
+                print(f"  总记录数: {count} 条")
+                if result.get('data'):
+                    print(f"    数据已保存")
         else:
             print(f"\n❌ {task} 同步失败: {result.get('error', '未知错误')}")
             

@@ -441,6 +441,121 @@ class NavigationHelper:
 
         return snapshot
 
+    async def expand_all_groups(self, max_depth: int = 3) -> int:
+        """
+        展开所有分组层级，获取完整数据
+
+        Args:
+            max_depth: 最大展开深度
+
+        Returns:
+            展开的项数
+        """
+        expanded_count = 0
+
+        try:
+            self.logger.info("开始展开分组层级...")
+
+            for depth in range(max_depth):
+                # 查找所有可展开的行（有+图标的）
+                expandable_rows = await self.page.query_selector_all(
+                    '.gridLine [class*="gridListH"], '  # 层级图标
+                    '.gridLine [class*="zoomI"][level="true"], '  # 可展开图标
+                    '.gridBoxImg [class*="gridListH"]'  # 展开按钮
+                )
+
+                if not expandable_rows:
+                    self.logger.info(f"第 {depth + 1} 层：无可展开项")
+                    break
+
+                self.logger.info(f"第 {depth + 1} 层：找到 {len(expandable_rows)} 个可展开项")
+
+                # 点击每个可展开项
+                for row in expandable_rows:
+                    try:
+                        # 检查是否已经展开（图标样式）
+                        parent = await row.query_selector("xpath=..")
+                        if parent:
+                            parent_class = await parent.get_attribute("class") or ""
+
+                        # 点击展开
+                        await row.click()
+                        await asyncio.sleep(0.3)  # 短暂等待
+                        expanded_count += 1
+
+                    except Exception as e:
+                        continue
+
+                # 等待子项加载
+                await asyncio.sleep(1)
+
+            self.logger.info(f"共展开 {expanded_count} 个分组项")
+
+        except Exception as e:
+            self.logger.error(f"展开分组失败: {e}")
+
+        return expanded_count
+
+    async def expand_all_hierarchical_items(self) -> int:
+        """
+        使用JavaScript批量展开所有层级项目
+
+        Returns:
+            展开的项数
+        """
+        try:
+            result = await self.page.evaluate("""() => {
+                let expanded = 0;
+                const maxIterations = 100;
+                let iterations = 0;
+
+                // 查找所有带层级图标的行
+                const findAndExpand = () => {
+                    // 查找带+图标的行（可展开）
+                    const rows = document.querySelectorAll('.gridLine');
+                    let found = false;
+
+                    rows.forEach(row => {
+                        // 检查是否有层级图标
+                        const zoomIcon = row.querySelector('.zoomI[level="true"]');
+                        const listIcon = row.querySelector('.gridListH');
+
+                        if (zoomIcon || listIcon) {
+                            // 检查是否是折叠状态
+                            const hasPlus = zoomIcon?.textContent?.includes('+') ||
+                                           listIcon?.textContent?.includes('+');
+                            const hasMinus = zoomIcon?.textContent?.includes('-') ||
+                                            listIcon?.textContent?.includes('-');
+
+                            if (hasPlus) {
+                                // 点击展开
+                                const box = row.querySelector('.gridBox');
+                                if (box) {
+                                    box.click();
+                                    found = true;
+                                }
+                            }
+                        }
+                    });
+
+                    return found;
+                };
+
+                // 循环展开直到没有更多可展开项
+                while (findAndExpand() && iterations < maxIterations) {
+                    iterations++;
+                }
+
+                return { expanded: iterations, totalRows: document.querySelectorAll('.gridLine').length };
+            }""")
+
+            self.logger.info(f"层级展开结果: {result}")
+            return result.get('expanded', 0)
+
+        except Exception as e:
+            self.logger.error(f"JS展开失败: {e}")
+            return 0
+
 
 def create_navigation_helper(page: Page) -> NavigationHelper:
     """创建导航辅助实例"""

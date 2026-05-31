@@ -38,6 +38,11 @@ class CustomerScraper(PaginationScraper):
             # 等待数据加载
             await asyncio.sleep(3)
 
+            # 展开所有层级分组
+            self.logger.info("尝试展开层级分组...")
+            await self.nav.expand_all_hierarchical_items()
+            await asyncio.sleep(2)
+
             # 截图诊断
             await self.screenshot("customers_list.png")
 
