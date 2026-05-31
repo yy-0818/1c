@@ -42,13 +42,9 @@ class CustomerScraper(PaginationScraper):
             # 截图诊断
             await self.screenshot("customers_list.png")
 
-            # 滚动加载所有数据
+            # 滚动加载所有数据（基于数据内容检测）
             self.logger.info("开始滚动加载数据...")
-            await self.nav.scroll_to_load_all(max_scrolls=50, scroll_delay=1.5)
-            await asyncio.sleep(2)
-
-            # 提取所有数据
-            all_data = await self._extract_grid_data()
+            all_data = await self.scroll_and_extract_all()
 
             # 去重
             seen = set()
@@ -76,10 +72,72 @@ class CustomerScraper(PaginationScraper):
             await self.screenshot("customers_error.png")
             return {"success": False, "count": 0, "data": [], "errors": [str(e)]}
 
+    async def scroll_and_extract_all(self) -> List[Dict[str, Any]]:
+        """
+        滚动页面并提取所有数据
+        基于实际数据内容变化来判断是否加载了新数据
+        """
+        all_data = []
+        seen_keys = set()  # 用于检测新数据
+        max_scrolls = 100
+        scroll_delay = 1.5
+        no_new_data_count = 0
+
+        self.logger.info("开始滚动提取数据...")
+
+        # 聚焦gridBody
+        await self.page.evaluate("""() => {
+            const gridBody = document.querySelector('.gridBody');
+            if (gridBody) {
+                gridBody.focus();
+            }
+        }""")
+
+        for i in range(max_scrolls):
+            # 滚动
+            await self.page.keyboard.press('PageDown')
+            await asyncio.sleep(scroll_delay)
+
+            # 额外设置scrollTop确保滚动
+            await self.page.evaluate("""() => {
+                const gridBody = document.querySelector('.gridBody');
+                if (gridBody) {
+                    gridBody.scrollTop = gridBody.scrollHeight;
+                }
+            }""")
+            await asyncio.sleep(0.3)
+
+            # 提取当前页数据
+            page_data = await self._extract_grid_data()
+
+            # 检测新数据
+            new_count = 0
+            for item in page_data:
+                key = item.get('name', '') + item.get('code', '')
+                if key and key not in seen_keys:
+                    seen_keys.add(key)
+                    all_data.append(item)
+                    new_count += 1
+
+            if new_count > 0:
+                self.logger.info(f"滚动 {i + 1}: 发现 {new_count} 条新数据 (总计 {len(all_data)})")
+                no_new_data_count = 0
+            else:
+                no_new_data_count += 1
+                self.logger.info(f"滚动 {i + 1}: 无新数据，连续 {no_new_data_count} 次")
+
+                # 连续5次无新数据则停止
+                if no_new_data_count >= 5:
+                    self.logger.info("连续多次无新数据，停止滚动")
+                    break
+
+        self.logger.info(f"滚动提取完成: 共 {len(all_data)} 条数据")
+        return all_data
+
     async def _extract_grid_data(self) -> List[Dict[str, Any]]:
         """从1C的gridBody提取客户数据"""
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
             all_data = []
             grid_lines = await self.driver.page.query_selector_all(".gridLine")
@@ -113,9 +171,13 @@ class CustomerScraper(PaginationScraper):
                 except Exception as e:
                     continue
 
-            self.logger.info(f"提取到 {len(all_data)} 条原始数据")
             return all_data
 
         except Exception as e:
             self.logger.error(f"提取失败: {e}")
             return []
+
+    @property
+    def page(self):
+        """获取page对象"""
+        return self.driver.page
