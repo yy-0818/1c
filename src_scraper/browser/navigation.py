@@ -51,6 +51,7 @@ class NavigationHelper:
         self.page = page
         self._loaded = False
         self._current_form = None
+        self.logger = logger  # 使用模块级logger
 
     async def navigate_to(self, section: str) -> bool:
         """
